@@ -1,0 +1,2 @@
+# Output directory for saved videos
+# Videos will be saved here if SAVE_OUTPUT_VIDEO = True in config.py

@@ -1,0 +1,101 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+.DS_Store
+
+# Models (Don't commit large models)
+models/whisper/*.pt
+models/whisper/*.bin
+models/llama/*.gguf
+models/llama/*.bin
+models/llama/*.pth
+models/wav2lip/*.pth
+models/wav2lip/*.pt
+
+# Input Media
+input/images/*.jpg
+input/images/*.png
+input/images/*.jpeg
+input/videos/*.mp4
+input/videos/*.avi
+input/videos/*.mov
+
+# Output
+output/*.mp4
+output/*.avi
+output/*.mov
+output/*.wav
+*.mp4
+*.avi
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+tmp/
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+*.ipynb
+
+# Cache
+.cache/
+*.cache
+
+# pytest
+.pytest_cache/
+
+# Coverage
+.coverage
+htmlcov/
+
+# mypy
+.mypy_cache/
+
+# PyCharm
+.idea/
+
+# System files
+Thumbs.db
+.DS_Store
+
+# Wav2Lip repository (if cloned locally)
+Wav2Lip/
+
+# CUDA compilation cache
+.nv/
