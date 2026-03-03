@@ -21,6 +21,9 @@ llama-cpp-python>=0.2.0
 # Install with CUDA support:
 # CMAKE_ARGS="-DLLAMA_CUBLAS=on" pip install llama-cpp-python
 
+# Groq API (cloud-based LLM)
+groq>=0.4.0
+
 # Text-to-Speech
 edge-tts>=6.1.0
 
@@ -39,6 +42,7 @@ imageio-ffmpeg>=0.4.9
 # Async & Utilities
 aiofiles>=23.2.0
 tqdm>=4.66.0
+python-dotenv>=1.0.0  # Environment variable management
 
 # Monitoring & Logging
 psutil>=5.9.0  # For system monitoring

@@ -9,6 +9,7 @@ import torch
 from typing import Optional, Tuple, List
 import logging
 from pathlib import Path
+import sys
 
 logger = logging.getLogger(__name__)
 
@@ -53,25 +54,43 @@ class Wav2LipProcessor:
         try:
             logger.info(f"Loading Wav2Lip model from: {self.checkpoint_path}")
             
+            # Add Wav2Lip repository to Python path
+            wav2lip_repo = Path(__file__).parent.parent.parent / "Wav2Lip"
+            if wav2lip_repo.exists():
+                sys.path.insert(0, str(wav2lip_repo))
+                logger.info(f"Added Wav2Lip repo to path: {wav2lip_repo}")
+            else:
+                logger.warning(f"Wav2Lip repo not found at: {wav2lip_repo}")
+            
             # Import Wav2Lip inference
-            # Note: This assumes you have Wav2Lip repository code available
-            # You'll need to add Wav2Lip to your Python path
             try:
                 from models import Wav2Lip
-            except ImportError:
-                logger.error("Wav2Lip models not found. Please add Wav2Lip repo to Python path")
+            except ImportError as e:
+                logger.error(f"Wav2Lip models not found: {e}")
+                logger.error("Please ensure Wav2Lip repository is cloned in project root")
                 raise
             
-            # Load checkpoint
-            checkpoint = torch.load(
-                str(self.checkpoint_path),
-                map_location=self.device
-            )
+            # Load checkpoint - handle both TorchScript and regular checkpoints
+            try:
+                # Try loading as TorchScript first
+                logger.info("Attempting to load as TorchScript model")
+                self.model = torch.jit.load(str(self.checkpoint_path), map_location=self.device)
+                logger.info("Loaded as TorchScript model")
+            except Exception as e:
+                logger.info(f"Not a TorchScript model ({e}), loading as state_dict")
+                # Load as regular checkpoint
+                checkpoint = torch.load(
+                    str(self.checkpoint_path),
+                    map_location=self.device,
+                    weights_only=False
+                )
+                
+                # Initialize model
+                self.model = Wav2Lip()
+                self.model.load_state_dict(checkpoint["state_dict"])
+                self.model = self.model.to(self.device)
             
-            # Initialize model
-            self.model = Wav2Lip()
-            self.model.load_state_dict(checkpoint["state_dict"])
-            self.model = self.model.to(self.device)
+            # Set to eval mode
             self.model.eval()
             
             # Use FP16 if enabled
@@ -90,29 +109,48 @@ class Wav2LipProcessor:
         Preprocess audio to mel spectrogram
         
         Args:
-            audio: Audio array (int16)
-            sample_rate: Sample rate
+            audio: Audio array (int16 or float32)
+            sample_rate: Sample rate (Wav2Lip expects 16000)
             
         Returns:
             Mel spectrogram
         """
         try:
+            # Ensure Wav2Lip is in path
+            wav2lip_repo = Path(__file__).parent.parent.parent / "Wav2Lip"
+            if str(wav2lip_repo) not in sys.path and wav2lip_repo.exists():
+                sys.path.insert(0, str(wav2lip_repo))
+            
             # Import audio processing from Wav2Lip
-            from audio import melspectrogram
+            import audio as wav2lip_audio
             
-            # Normalize audio
-            audio_float = audio.astype(np.float32) / 32768.0
+            # Normalize audio to float32 in range [-1, 1]
+            if audio.dtype == np.int16:
+                audio_float = audio.astype(np.float32) / 32768.0
+            else:
+                audio_float = audio.astype(np.float32)
             
-            # Generate mel spectrogram
-            mel = melspectrogram(audio_float, sample_rate)
+            # Ensure audio is in correct range
+            audio_float = np.clip(audio_float, -1.0, 1.0)
+            
+            logger.info(f"Audio shape before mel: {audio_float.shape}, sample_rate: {sample_rate}")
+            
+            # Generate mel spectrogram (Wav2Lip's melspectrogram takes only 1 argument)
+            mel = wav2lip_audio.melspectrogram(audio_float)
+            
+            logger.info(f"Mel spectrogram shape: {mel.shape}")
             
             return mel
             
-        except ImportError:
-            logger.error("Wav2Lip audio module not found")
+        except ImportError as e:
+            logger.error(f"Wav2Lip audio module not found: {e}")
+            import traceback
+            traceback.print_exc()
             return np.zeros((80, 16))
         except Exception as e:
             logger.error(f"Audio preprocessing error: {e}")
+            import traceback
+            traceback.print_exc()
             return np.zeros((80, 16))
     
     def preprocess_frame(self, frame: np.ndarray) -> torch.Tensor:
@@ -162,27 +200,45 @@ class Wav2LipProcessor:
         try:
             # Preprocess audio to mel spectrogram
             mel = self.preprocess_audio(audio, sample_rate)
+            # mel has shape (80, T) where T is total time steps
             
-            # Calculate number of frames needed
-            mel_chunks = mel.shape[1]
-            num_frames = mel_chunks
+            logger.info(f"Full mel shape: {mel.shape}")
+            
+            # Chunk mel spectrogram into 16-step windows (Wav2Lip expects 16 time steps per frame)
+            mel_step_size = 16
+            mel_chunks = []
+            
+            for i in range(0, mel.shape[1], mel_step_size):
+                if i + mel_step_size <= mel.shape[1]:
+                    mel_chunks.append(mel[:, i:i + mel_step_size])
+                else:
+                    # Pad last chunk if needed
+                    last_chunk = mel[:, i:]
+                    if last_chunk.shape[1] < mel_step_size:
+                        pad_width = mel_step_size - last_chunk.shape[1]
+                        last_chunk = np.pad(last_chunk, ((0, 0), (0, pad_width)), mode='edge')
+                    mel_chunks.append(last_chunk)
+            
+            if not mel_chunks:
+                logger.warning("No mel chunks generated, returning original frame")
+                return [face_frame]
+            
+            num_frames = len(mel_chunks)
             
             # Preprocess face frame
             face_tensor = self.preprocess_frame(face_frame)
             
-            # Prepare frame sequence (repeat same frame for all mel chunks)
-            faces = face_tensor.unsqueeze(0).repeat(num_frames, 1, 1, 1)
-            faces = faces.to(self.device)
+            # Prepare face batches (repeat same frame for all mel chunks)
+            # Convert to (H, W, C) for Wav2Lip's expected input
+            face_np = face_frame.copy()
+            face_np = cv2.resize(face_np, (96, 96))  # Wav2Lip uses 96x96
             
-            if self.use_fp16 and self.device == "cuda":
-                faces = faces.half()
+            # Create masked version (mask lower half)
+            face_masked = face_np.copy()
+            face_masked[48:, :] = 0  # Mask lower half
             
-            # Prepare mel spectrogram
-            mel_tensor = torch.FloatTensor(mel.T).unsqueeze(0).unsqueeze(0)
-            mel_tensor = mel_tensor.to(self.device)
-            
-            if self.use_fp16 and self.device == "cuda":
-                mel_tensor = mel_tensor.half()
+            # Concatenate masked and original (this creates 6 channels for RGB images)
+            face_combined = np.concatenate((face_masked, face_np), axis=2) / 255.0
             
             # Generate in batches
             generated_frames = []
@@ -190,30 +246,43 @@ class Wav2LipProcessor:
             with torch.no_grad():
                 for i in range(0, num_frames, self.batch_size):
                     batch_end = min(i + self.batch_size, num_frames)
+                    batch_size_actual = batch_end - i
                     
-                    face_batch = faces[i:batch_end]
-                    mel_batch = mel_tensor[:, :, i:batch_end, :]
+                    # Prepare face batch
+                    img_batch = np.repeat(face_combined[np.newaxis, :, :, :], batch_size_actual, axis=0)
+                    img_batch = torch.FloatTensor(np.transpose(img_batch, (0, 3, 1, 2)))  # (B, C, H, W)
+                    img_batch = img_batch.to(self.device)
+                    
+                    # Prepare mel batch
+                    mel_batch = np.array(mel_chunks[i:batch_end])  # (B, 80, 16)
+                    mel_batch = mel_batch.reshape(batch_size_actual, 80, 16, 1)  # (B, 80, 16, 1)
+                    mel_batch = torch.FloatTensor(np.transpose(mel_batch, (0, 3, 1, 2)))  # (B, 1, 80, 16)
+                    mel_batch = mel_batch.to(self.device)
+                    
+                    if self.use_fp16 and self.device == "cuda":
+                        img_batch = img_batch.half()
+                        mel_batch = mel_batch.half()
                     
                     # Generate
-                    pred = self.model(mel_batch, face_batch)
+                    pred = self.model(mel_batch, img_batch)
                     
                     # Postprocess
                     pred = pred.cpu().float().numpy()
-                    pred = pred.transpose(0, 2, 3, 1)  # (B, C, H, W) -> (B, H, W, C)
-                    
-                    # Denormalize
-                    pred = (pred * 0.5 + 0.5) * 255.0
+                    pred = pred.transpose(0, 2, 3, 1) * 255.0  # (B, H, W, C)
                     pred = pred.astype(np.uint8)
                     
-                    # Convert RGB to BGR
+                    # Resize back to 256x256 and convert RGB to BGR
                     for frame in pred:
-                        frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                        frame_resized = cv2.resize(frame, (self.face_size, self.face_size))
+                        frame_bgr = cv2.cvtColor(frame_resized, cv2.COLOR_RGB2BGR)
                         generated_frames.append(frame_bgr)
             
             return generated_frames
             
         except Exception as e:
             logger.error(f"Lip sync generation error: {e}")
+            import traceback
+            traceback.print_exc()
             # Return original frame as fallback
             return [face_frame]
     

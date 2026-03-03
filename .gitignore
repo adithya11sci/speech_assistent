@@ -51,13 +51,18 @@ input/videos/*.mp4
 input/videos/*.avi
 input/videos/*.mov
 
-# Output
-output/*.mp4
-output/*.avi
-output/*.mov
-output/*.wav
+# Output and Media Files
+output/
+test_output/
 *.mp4
 *.avi
+*.mov
+*.mkv
+*.webm
+*.mp3
+*.wav
+*.ogg
+*.flac
 
 # Logs
 *.log
@@ -66,8 +71,6 @@ logs/
 # Temporary files
 *.tmp
 *.temp
-temp/
-tmp/
 
 # Jupyter Notebooks
 .ipynb_checkpoints/
@@ -99,3 +102,48 @@ Wav2Lip/
 
 # CUDA compilation cache
 .nv/
+
+# Test outputs
+test_*.py
+*_test.py
+
+# Face detection cache
+face_coords_cache.json
+*.json.bak
+
+# API Keys and secrets
+.env
+*.key
+secrets/
+api_keys.txt
+
+# Downloaded models and checkpoints
+*.gguf
+*.safetensors
+*.msgpack
+*.h5
+*.pkl
+*.pickle
+
+# Temporary processing files
+temp_audio/
+temp_frames/
+temp_video/
+temp/
+tmp/
+
+# System-specific
+desktop.ini
+*.lnk
+
+# PyTorch checkpoints
+checkpoint/
+checkpoints/
+*.ckpt
+
+# Hugging Face cache
+.cache/huggingface/
+transformers_cache/
+
+# Edge-TTS cache
+.edge_tts_cache/

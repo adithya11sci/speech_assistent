@@ -11,7 +11,7 @@ import time
 from preprocessing import SourceLoader, FaceDetector
 from audio import MicrophoneStream, AudioProcessor
 from stt import WhisperStream
-from llm import LlamaStream
+from llm import LlamaStream, GroqStream
 from tts import EdgeTTSStream
 from lipsync import Wav2LipProcessor
 from renderer import FrameRenderer
@@ -109,22 +109,34 @@ class AvatarPipeline:
             )
             self.whisper.load_model()
             
-            # 5. Llama LLM
-            logger.info("Loading Llama model...")
-            self.llama = LlamaStream(
-                model_path=str(config.LLAMA_MODEL_PATH),
-                n_gpu_layers=config.LLAMA_N_GPU_LAYERS,
-                n_ctx=config.LLAMA_N_CTX,
-                n_batch=config.LLAMA_N_BATCH,
-                n_threads=config.LLAMA_N_THREADS,
-                temperature=config.LLAMA_TEMPERATURE,
-                top_p=config.LLAMA_TOP_P,
-                top_k=config.LLAMA_TOP_K,
-                max_tokens=config.LLAMA_MAX_TOKENS,
-                system_prompt=config.SYSTEM_PROMPT,
-                use_flash_attention=config.USE_FLASH_ATTENTION
-            )
-            self.llama.load_model()
+            # 5. LLM (Groq or Llama)
+            if config.LLM_BACKEND == "groq":
+                logger.info("Initializing Groq API...")
+                self.llama = GroqStream(
+                    api_key=config.GROQ_API_KEY,
+                    model=config.GROQ_MODEL,
+                    temperature=config.LLM_TEMPERATURE,
+                    top_p=config.LLM_TOP_P,
+                    max_tokens=config.LLM_MAX_TOKENS,
+                    system_prompt=config.SYSTEM_PROMPT
+                )
+                self.llama.load_model()
+            else:
+                logger.info("Loading local Llama model...")
+                self.llama = LlamaStream(
+                    model_path=str(config.LLAMA_MODEL_PATH),
+                    n_gpu_layers=config.LLAMA_N_GPU_LAYERS,
+                    n_ctx=config.LLAMA_N_CTX,
+                    n_batch=config.LLAMA_N_BATCH,
+                    n_threads=config.LLAMA_N_THREADS,
+                    temperature=config.LLM_TEMPERATURE,
+                    top_p=config.LLM_TOP_P,
+                    top_k=config.LLM_TOP_K,
+                    max_tokens=config.LLM_MAX_TOKENS,
+                    system_prompt=config.SYSTEM_PROMPT,
+                    use_flash_attention=config.USE_FLASH_ATTENTION
+                )
+                self.llama.load_model()
             
             # 6. Edge-TTS
             logger.info("Initializing TTS...")

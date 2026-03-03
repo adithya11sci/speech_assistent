@@ -4,6 +4,10 @@ All paths and parameters are centralized here
 """
 import os
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # ========== PROJECT PATHS ==========
 BASE_DIR = Path(__file__).parent.parent
@@ -54,16 +58,26 @@ WHISPER_BEAM_SIZE = 1  # 1 for speed, 5 for accuracy
 WHISPER_VAD_FILTER = True
 WHISPER_VAD_THRESHOLD = 0.5
 
-# ========== LLM SETTINGS (Llama.cpp) ==========
+# ========== LLM SETTINGS ==========
+# Choose LLM backend: "local" (llama.cpp) or "groq" (Groq API)
+LLM_BACKEND = "groq"  # "local" or "groq"
+
+# Groq API Settings (when LLM_BACKEND = "groq")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")  # Set your API key in .env file
+GROQ_MODEL = "llama-3.1-8b-instant"  # Options: llama-3.1-8b-instant, mixtral-8x7b-32768, etc.
+
+# Local Llama Settings (when LLM_BACKEND = "local")
 LLAMA_N_GPU_LAYERS = -1  # -1 = offload all layers to GPU
 LLAMA_N_CTX = 4096       # Context window
 LLAMA_N_BATCH = 512      # Batch size for prompt processing
 LLAMA_N_THREADS = 8      # CPU threads
-LLAMA_TEMPERATURE = 0.7
-LLAMA_TOP_P = 0.9
-LLAMA_TOP_K = 40
-LLAMA_MAX_TOKENS = 512
-LLAMA_STREAM = True
+
+# Common LLM Settings (applies to both backends)
+LLM_TEMPERATURE = 0.7
+LLM_TOP_P = 0.9
+LLM_TOP_K = 40
+LLM_MAX_TOKENS = 512
+LLM_STREAM = True
 
 # System prompt for the avatar
 SYSTEM_PROMPT = """You are a helpful, friendly AI assistant. Keep your responses concise and conversational. 

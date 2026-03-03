@@ -214,7 +214,7 @@ def main():
     
     try:
         # Try importing Wav2Lip modules
-        import sys
+
         # Check if Wav2Lip is in path
         wav2lip_check = False
         
