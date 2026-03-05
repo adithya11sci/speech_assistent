@@ -143,9 +143,9 @@ def main():
                 break
     
     if not llama_found:
-        print_error("No Llama GGUF model found in models/llama/")
-        print_info("Download from: https://huggingface.co/models?search=llama+gguf")
-        all_checks_passed = False
+        print_info("No Llama GGUF model found in models/llama/")
+        print_info("This is OK if using Groq API (cloud LLM) instead of local Llama")
+        print_info("To use local Llama: Download from https://huggingface.co/models?search=llama+gguf")
     
     # Wav2Lip
     wav2lip_checkpoint = models_dir / "wav2lip" / "wav2lip_gan.pth"

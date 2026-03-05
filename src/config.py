@@ -94,10 +94,10 @@ TTS_CHUNK_DURATION = 0.5  # seconds per audio chunk
 
 # ========== WAV2LIP SETTINGS ==========
 WAV2LIP_DEVICE = "cuda"
-WAV2LIP_BATCH_SIZE = 1  # Keep at 1 for real-time
+WAV2LIP_BATCH_SIZE = 128  # Increased for faster GPU batch inference
 WAV2LIP_FPS = 25
-WAV2LIP_FACE_SIZE = 256  # 256x256 for speed, 384x384 for quality
-WAV2LIP_FACE_DETECTION_BATCH_SIZE = 4
+WAV2LIP_FACE_SIZE = 192  # 192x192 for faster speed (was 256)
+WAV2LIP_FACE_DETECTION_BATCH_SIZE = 8
 WAV2LIP_BOX_EXPANSION = 0.1  # Expand face box by 10%
 
 # Sliding window for smooth lip sync

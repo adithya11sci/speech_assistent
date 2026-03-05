@@ -48,6 +48,10 @@ class Wav2LipProcessor:
         self.model = None
         self.mel_step_size = 16
         self.audio_buffer = []
+
+        # Optimization cached properties
+        self._cached_mask = None
+        self._cached_mask_size = None
         
     def load_model(self):
         """Load Wav2Lip model"""
@@ -127,11 +131,20 @@ class Wav2LipProcessor:
             # Normalize audio to float32 in range [-1, 1]
             if audio.dtype == np.int16:
                 audio_float = audio.astype(np.float32) / 32768.0
+            elif audio.dtype == np.float64:
+                audio_float = audio.astype(np.float32)
             else:
                 audio_float = audio.astype(np.float32)
+                # If audio is already in [0, 1] range, convert to [-1, 1]
+                if audio_float.max() <= 1.0 and audio_float.min() >= 0.0:
+                    audio_float = audio_float * 2.0 - 1.0
             
-            # Ensure audio is in correct range
+            # Ensure audio is in correct range and clip extreme values
             audio_float = np.clip(audio_float, -1.0, 1.0)
+            
+            # Apply slight normalization for better lip sync (helps with quiet audio)
+            if np.abs(audio_float).max() > 0.01:
+                audio_float = audio_float * (0.95 / np.abs(audio_float).max())
             
             logger.info(f"Audio shape before mel: {audio_float.shape}, sample_rate: {sample_rate}")
             
@@ -179,6 +192,54 @@ class Wav2LipProcessor:
         
         return frame_tensor
     
+    def blend_face(self, original_face: np.ndarray, synced_face: np.ndarray) -> np.ndarray:
+        """
+        Blend the lip-synced face with original to reduce artifacts
+        
+        Args:
+            original_face: Original face (BGR)
+            synced_face: Lip-synced face (BGR)
+            
+        Returns:
+            Blended face
+        """
+        # Ensure both faces have the same size
+        if original_face.shape != synced_face.shape:
+            original_face = cv2.resize(original_face, (synced_face.shape[1], synced_face.shape[0]))
+        
+        h, w = synced_face.shape[:2]
+        
+        # Use cached mask if size matches
+        if self._cached_mask is not None and self._cached_mask_size == (h, w):
+            mask = self._cached_mask
+        else:
+            # Create a mask for blending - focus on lower face (mouth region)
+            mask = np.zeros((h, w), dtype=np.float32)
+            
+            # Create smooth circular/elliptical mask for mouth region
+            center_y, center_x = int(h * 0.65), int(w * 0.5)
+            radius_y, radius_x = int(h * 0.25), int(w * 0.35)
+            
+            y_grid, x_grid = np.ogrid[:h, :w]
+            mask_region = ((x_grid - center_x) / radius_x) ** 2 + ((y_grid - center_y) / radius_y) ** 2 <= 1
+            mask[mask_region] = 1.0
+            
+            # Apply Gaussian blur for smooth transition
+            kernel_size = max(3, int(h * 0.2) | 1)  # Make odd, proportional to face size
+            mask = cv2.GaussianBlur(mask, (kernel_size, kernel_size), kernel_size // 3)
+            
+            # Expand mask to 3 channels
+            mask = np.expand_dims(mask, axis=2)
+            
+            # Cache it
+            self._cached_mask = mask
+            self._cached_mask_size = (h, w)
+        
+        # Blend: use synced face for mouth region, original for rest
+        blended = (synced_face * mask + original_face * (1 - mask)).astype(np.uint8)
+        
+        return blended
+    
     def generate_lip_sync(self,
                          face_frame: np.ndarray,
                          audio: np.ndarray,
@@ -204,16 +265,22 @@ class Wav2LipProcessor:
             
             logger.info(f"Full mel shape: {mel.shape}")
             
-            # Chunk mel spectrogram into 16-step windows (Wav2Lip expects 16 time steps per frame)
+            # Wav2Lip uses 80 temporal steps per second (16000 SR / 200 hop_size)
+            # To get frames at self.fps, we use an index multiplier of 80.0 / self.fps
             mel_step_size = 16
+            mel_idx_multiplier = 80.0 / self.fps
+            
+            # Calculate total video frames based on audio length
+            num_frames = int((mel.shape[1] / 80.0) * self.fps)
             mel_chunks = []
             
-            for i in range(0, mel.shape[1], mel_step_size):
-                if i + mel_step_size <= mel.shape[1]:
-                    mel_chunks.append(mel[:, i:i + mel_step_size])
+            for i in range(num_frames):
+                start_idx = int(i * mel_idx_multiplier)
+                if start_idx + mel_step_size <= mel.shape[1]:
+                    mel_chunks.append(mel[:, start_idx : start_idx + mel_step_size])
                 else:
                     # Pad last chunk if needed
-                    last_chunk = mel[:, i:]
+                    last_chunk = mel[:, start_idx : ]
                     if last_chunk.shape[1] < mel_step_size:
                         pad_width = mel_step_size - last_chunk.shape[1]
                         last_chunk = np.pad(last_chunk, ((0, 0), (0, pad_width)), mode='edge')
@@ -231,13 +298,18 @@ class Wav2LipProcessor:
             # Prepare face batches (repeat same frame for all mel chunks)
             # Convert to (H, W, C) for Wav2Lip's expected input
             face_np = face_frame.copy()
-            face_np = cv2.resize(face_np, (96, 96))  # Wav2Lip uses 96x96
             
-            # Create masked version (mask lower half)
+            # CRITICAL: Convert BGR to RGB before processing (fixes blue color issue)
+            face_np = cv2.cvtColor(face_np, cv2.COLOR_BGR2RGB)
+            
+            # Resize to 96x96 (Wav2Lip's expected input size)
+            face_np = cv2.resize(face_np, (96, 96))
+            
+            # Create masked version (mask lower half for better lip sync)
             face_masked = face_np.copy()
-            face_masked[48:, :] = 0  # Mask lower half
+            face_masked[48:, :] = 0  # Mask lower half (mouth region)
             
-            # Concatenate masked and original (this creates 6 channels for RGB images)
+            # Concatenate masked and original (6 channels: 3 for masked + 3 for original)
             face_combined = np.concatenate((face_masked, face_np), axis=2) / 255.0
             
             # Generate in batches
@@ -269,13 +341,21 @@ class Wav2LipProcessor:
                     # Postprocess
                     pred = pred.cpu().float().numpy()
                     pred = pred.transpose(0, 2, 3, 1) * 255.0  # (B, H, W, C)
+                    
+                    # Clip to valid range to avoid artifacts
+                    pred = np.clip(pred, 0, 255)
                     pred = pred.astype(np.uint8)
                     
                     # Resize back to 256x256 and convert RGB to BGR
                     for frame in pred:
-                        frame_resized = cv2.resize(frame, (self.face_size, self.face_size))
+                        # Use high-quality resizing for better lip sync quality
+                        frame_resized = cv2.resize(frame, (self.face_size, self.face_size), 
+                                                  interpolation=cv2.INTER_CUBIC)
                         frame_bgr = cv2.cvtColor(frame_resized, cv2.COLOR_RGB2BGR)
-                        generated_frames.append(frame_bgr)
+                        
+                        # Blend with original face for smoother result (reduces artifacts)
+                        blended_frame = self.blend_face(face_frame, frame_bgr)
+                        generated_frames.append(blended_frame)
             
             return generated_frames
             

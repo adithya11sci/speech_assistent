@@ -3,11 +3,18 @@ Streaming LLM using llama-cpp-python
 Optimized for real-time token streaming with GPU acceleration
 """
 import asyncio
-from llama_cpp import Llama
 from typing import Optional, List, Dict
 import logging
 
 logger = logging.getLogger(__name__)
+
+# Conditional import - only import if needed
+try:
+    from llama_cpp import Llama
+    LLAMA_CPP_AVAILABLE = True
+except ImportError:
+    LLAMA_CPP_AVAILABLE = False
+    logger.warning("llama-cpp-python not installed. Install it to use local LLM: pip install llama-cpp-python")
 
 
 class LlamaStream:
@@ -58,6 +65,13 @@ class LlamaStream:
         
     def load_model(self):
         """Load Llama model"""
+        if not LLAMA_CPP_AVAILABLE:
+            raise ImportError(
+                "llama-cpp-python is not installed. "
+                "Install it with: pip install llama-cpp-python "
+                "Or use Groq API instead by setting LLM_BACKEND='groq' in config.py"
+            )
+        
         try:
             logger.info(f"Loading Llama model from: {self.model_path}")
             
